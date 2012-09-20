@@ -1,7 +1,3 @@
-//java -jar BlackAndWhiteVis.jar -exec "<command>"
-
-
-
 import java.awt.*;
 import java.awt.geom.*;
 import java.awt.event.*;
@@ -17,25 +13,19 @@ public class BlackAndWhiteVis {
     final int MIN_SZ = 20, MAX_SZ = 100;
     final double MIN_WHITE_SHARE = 0.05, MAX_WHITE_SHARE = 0.4;
     final double MIN_POWER = 1.25, MAX_POWER = 1.75;
-
-    final char BLACK='.';
-    final char WHITE='X';
-    final char VISITED='+';
-    final char MAX='*';
-
-    final int[] dr = {0, 1, 0, -1}, dc = {1, 0, -1, 0};
-
     // ----------------------------------------------------------------------------------
     int SZ;                   // size of the grid
     volatile char[][] grid;            // the grid itself
     volatile char current_tile;        // the tile in hand used during shifts
     volatile int row, col;             // the cell where the shift applies
     volatile int shift_index;          // the index of the current shift
-    ArrayList<Integer> results
+    static ArrayList<Double> results=new ArrayList<Double>();
+    static ArrayList<String> lastShift=new ArrayList<String>();
     // ----------------------------------------------------------------------------------
     boolean isConnected() {
         // check whether the current state of the grid has all 'X's connected
         // (both for generation and for validation of the return)
+        final int[] dr = {0, 1, 0, -1}, dc = {1, 0, -1, 0};
         char[][] g = new char[SZ][SZ];
         for (int i = 0; i < SZ; ++i) {
             g[i] = Arrays.copyOf(grid[i], SZ);
@@ -133,59 +123,6 @@ public class BlackAndWhiteVis {
         }
         return false;
     }
-
-    //finds the largest component and stores it in g[][]
-    //returns the dimensions of the largest component
-    char[][] findLargestComponent()
-    {
-      char[][] g=new char[SZ][SZ];
-      for (int i=0; i<SZ; i++) for (int k=0; k<SZ; k++) g[i][k]=grid[i][k];
-      int maxCount=0;
-      int[] rs = new int[SZ * SZ], cs = new int[SZ * SZ];
-
-      // find the first X, BFS from it and see whether there are any Xs left
-      for (int r0 = 0; r0 < SZ; ++r0)
-      {
-        for (int c0 = 0; c0 < SZ; ++c0)
-        {
-          if (g[r0][c0] != WHITE) continue;
-
-          // start BFS from this point
-          int ns = 1;
-          rs[0] = r0;
-          cs[0] = c0;
-          g[r0][c0] = VISITED;
-          for (int i = 0; i < ns; ++i)
-          {
-            for (int k = 0; k < 4; ++k)
-            {
-              int rNew=rs[i] + dr[k];
-              int cNew=cs[i] + dc[k];
-              if ( rNew<0 || rNew>=SZ || cNew<0 || cNew>=SZ || g[rNew][cNew] != WHITE) continue;
-
-              g[rNew][cNew] = VISITED;
-              rs[ns] = rNew;
-              cs[ns] = cNew;
-              ++ns;
-            }
-          }
-
-          if (ns>maxCount)
-          {
-            maxCount=ns;
-            
-            //remove previous max component
-            for (int i=0; i<SZ; i++) for (int k=0; k<SZ; k++) if (g[i][k]==MAX) g[i][k]=VISITED;
-            
-            //set this as the max component and find it's dimensions
-            for (int i=0; i<ns; i++) g[rs[i]][cs[i]]=MAX;
-          }
-        }
-      }
-
-      return g;
-    } 
-
     // ----------------------------------------------------------------------------------
     void generate(String seed) {
       try {
@@ -242,8 +179,8 @@ public class BlackAndWhiteVis {
  
             // apply random shifts without adding current tile to the board
             shifts_count = (int) Math.pow(SZ, rnd.nextDouble() * (MAX_POWER - MIN_POWER) + MIN_POWER);
-            //shifts_count=1;     //HACK!
             int direction, position, white_shifted, black_shifted;
+            lastShift=new ArrayList<String>();
             for (i = 0; i < shifts_count || current_tile == 'X'; ++i) {
                 // every shift must change the board, i.e., move at least one black and at least one white
                 do {
@@ -260,15 +197,23 @@ public class BlackAndWhiteVis {
                     }
                 } while (white_shifted == 0 || black_shifted == 0);
                 apply_shift(direction, position);
+                String s="";
+                if(direction==0) {
+                    s=position+" "+SZ;
+                } else if(direction==1) {
+                    s=position+" -1";
+                } else if(direction==2) {
+                    s=SZ+" "+position;
+                } else {
+                    s="-1 "+position;
+                }
+                lastShift.add(s);
             }
         } while (isConnected());                 // if the result is connected, restart generation
  
         if (debug) {
             System.out.println("% of white = " + white_share);
             System.out.println("Shifts done = " + shifts_count);
-            for (i = 0; i < SZ; ++i) {
-                System.out.println(new String(grid[i]));
-            }
         }
       }
       catch (Exception e) { 
@@ -315,7 +260,7 @@ public class BlackAndWhiteVis {
             }
             draw(2);
             if (!apply_shift_returned()) {
-                addFatalError("Element " + i + " of your return specifies an invalid shift. "+row+" "+col);
+                addFatalError("Element " + i + " of your return specifies an invalid shift.");
                 return 0;
             }
             draw(2);
@@ -379,12 +324,11 @@ public class BlackAndWhiteVis {
 // ------------- visualization part -----------------------------------------------------
     static int side;
     static String exec;
-    static boolean debug, vis, manual, ready, test;
+    static boolean debug, vis, manual, ready;
     static Process proc;
     static int del;
     InputStream is;
     OutputStream os;
-    BufferedReader br;
     JFrame jf;
     Vis v;
     volatile int phase;
@@ -394,20 +338,9 @@ public class BlackAndWhiteVis {
     String[] makeConnected(String[] gridin) throws IOException {
         int i,j;
         String[] ret = new String[0];
-        if (exec != null)
-        {   //imitate passing params
-            StringBuffer sb = new StringBuffer();
-            sb.append(SZ).append('\n');
-            for (i = 0; i < SZ; ++i)
-                sb.append(gridin[i]).append('\n');
-            os.write(sb.toString().getBytes());
-            os.flush();
- 
-            int Nret = Integer.parseInt(br.readLine());
-            ret = new String[Nret];
-            for (i = 0; i < Nret; ++i)
-                ret[i] = br.readLine();
-        }
+        BlackAndWhiteGame b=new BlackAndWhiteGame();
+        ret = /*new String[lastShift.size()];*/b.makeConnected(gridin);
+        //for(i=0;i<lastShift.size();i++) ret[i]=lastShift.get(lastShift.size()-i-1);
         return ret;
     }
     // ----------------------------------------------------------------------------------
@@ -420,13 +353,8 @@ public class BlackAndWhiteVis {
     }
     // ----------------------------------------------------------------------------------
     public class Vis extends JPanel implements MouseListener, WindowListener {
-        int selRow=-1;
-        int selCol=-1;
-
         public void paint(Graphics gr) {
-
-            char[][] maxComponent=findLargestComponent();
-            int i, j=-1;
+            int i, j;
             BufferedImage bi = new BufferedImage((SZ + 2) * side + 150, (SZ + 2) * side + 1, BufferedImage.TYPE_INT_RGB);
             Graphics2D g2 = (Graphics2D)bi.getGraphics();
             // background
@@ -444,37 +372,28 @@ public class BlackAndWhiteVis {
             // grid tiles
             for (i = 0; i < SZ; ++i)
             for (j = 0; j < SZ; ++j) {
-                if (maxComponent[i][j]==MAX)
-                  g2.setColor(Color.RED);
-                else
-                {
-                  // colors - just black and white
-                  if (grid[i][j] == '.') {
-                      g2.setColor(new Color(0x444444));
-                  } else {
-                      g2.setColor(new Color(0xFFFFFF));
-                  }
+                // colors - just black and white
+                if (grid[i][j] == '.') {
+                    g2.setColor(new Color(0x444444));
+                } else {
+                    g2.setColor(new Color(0xFFFFFF));
                 }
                 g2.fillRect((j + 1) * side + 1, (i + 1) * side + 1, side - 1, side - 1);
             }
  
             // the player's tile
-            if (phase == 1)         // draw the tile "in hand"
-            {
+            if (phase == 1) {         // draw the tile "in hand"
                 j = SZ + 3;
                 i = 1;
                 g2.setColor(Color.BLACK);
                 g2.drawLine(j * side, i * side, (j + 1) * side, i * side);
                 g2.drawLine(j * side, (i + 1) * side, (j + 1) * side, (i + 1) * side);
                 g2.drawLine(j * side, i * side, j * side, (i + 1) * side);
-                g2.drawLine((j + 1) * side, i * side, (j + 1) * side, (i + 1) * side); 
-            }
-            else if (phase==2)               // draw the tile on the border of the board, cell (row, col)
-            {
+                g2.drawLine((j + 1) * side, i * side, (j + 1) * side, (i + 1) * side);
+            } else {                  // draw the tile on the border of the board, cell (row, col)
                 j = col + 1;
                 i = row + 1;
             }
-
             if (current_tile == '.') {
                 g2.setColor(new Color(0x444444));
             } else {
@@ -488,11 +407,6 @@ public class BlackAndWhiteVis {
             g2.setFont(new Font("Arial",Font.BOLD,14));
             g2.drawChars(c,0,c.length, (SZ + 3) * side, 5 * side);
 
-            //draw current location
-            c = ("" + selRow+" "+selCol).toCharArray();
-            g2.setFont(new Font("Arial",Font.BOLD,14));
-            g2.drawChars(c,0,c.length, (SZ + 3) * side, 5 * side+100); 
-
             gr.drawImage(bi, 0, 0, (SZ + 2) * side + 150, (SZ + 2) * side + 1, null);
         }
         public Vis() {
@@ -501,22 +415,15 @@ public class BlackAndWhiteVis {
         }
         //MouseListener
         public void mouseClicked(MouseEvent e) {
-
+            // for manual play
+            if (!manual) return;
             // convert to args only clicks with valid coordinates
             row = e.getY() / side - 1;
             col = e.getX() / side - 1;
             if (row != -1 && row != SZ && col != -1 && col != SZ)
-            {
-                selRow=row;
-                selCol=col;
-                draw(1);
                 return;
-            }
-            if ((row == -1 || row == SZ) && (col == -1 || col == SZ))     //cannot click on corners
+            if ((row == -1 || row == SZ) && (col == -1 && col == SZ))
                 return;
-
-            // for manual play
-            //if (!manual) return;
  
             // a valid shift - apply
             ++shift_index;
@@ -556,80 +463,18 @@ public class BlackAndWhiteVis {
             v = new Vis();
             jf.getContentPane().add(v);
         }
-        if (exec != null) {
-            try {
-                Runtime rt = Runtime.getRuntime();
-                proc = rt.exec(exec);
-                os = proc.getOutputStream();
-                is = proc.getInputStream();
-                br = new BufferedReader(new InputStreamReader(is));
-                new ErrorReader(proc.getErrorStream()).start();
-            } catch (Exception e) { e.printStackTrace(); }
-        }
-        System.out.println("Score = "+runTest(seed));
-        if (proc != null)
-            try { proc.destroy(); } 
-            catch (Exception e) { e.printStackTrace(); }
+        results.add(100*runTest(seed));
       }
       catch (Exception e) { e.printStackTrace(); }
     }
-    // --------------- TESTING -------------------------------------------------------------------
-    public BlackAndWhiteVis() {
-      int startingSeed=2;
-      int numTests=100;
-
-      double totalScore=0;
-      double badReq=0.7;      //anything below this score is considered bad!
-      ArrayList<Integer> badSeeds =new ArrayList<Integer>();
-
-      for (int test=1, seed=startingSeed; test<=numTests; test++,seed++)
-      {
-        try {
-          //interface for runTest
-          if (vis)
-          {   jf = new JFrame();
-              v = new Vis();
-              jf.getContentPane().add(v);
-          }
-          if (exec != null) {
-              try {
-                  Runtime rt = Runtime.getRuntime();
-                  proc = rt.exec(exec);
-                  os = proc.getOutputStream();
-                  is = proc.getInputStream();
-                  br = new BufferedReader(new InputStreamReader(is));
-                  new ErrorReader(proc.getErrorStream()).start();
-              } catch (Exception e) { e.printStackTrace(); }
-          }
-          System.out.println("------------------------------------------");
-          System.out.println("Testing seed "+seed+" test "+test);
-          double score=runTest(""+seed);
-          totalScore+=score;
-          if (score<badReq) badSeeds.add(seed);
-          System.out.println("SCORE = "+score);
-          System.out.println("TOTAL SCORE = "+totalScore);
-          System.out.println("AVERAGE SCORE = "+totalScore/test);
-          System.out.println("NUM BAD = "+badSeeds.size());
-          if (proc != null)
-              try { proc.destroy(); } 
-              catch (Exception e) { e.printStackTrace(); }
-        }
-        catch (Exception e) { e.printStackTrace(); }
-      }
-
-      //print bad seeds
-      System.out.print("BAD SEEDS (< "+badReq+"):");
-      for (Integer a : badSeeds) System.out.print(" "+a);
-      System.out.println();
-    }
     // ----------------------------------------------------------------------------------
     public static void main(String[] args) {
-        boolean testNot=true;
+        boolean testNot=false;
         boolean stop=false;
-        int start=1;
-        int end=100;
+        int start=5;
+        int end=6;
         boolean printTimes=true;
-        del = 1;
+        del = 10;
         String seed = "1";
         vis = false;
         if(!testNot) vis=true;
